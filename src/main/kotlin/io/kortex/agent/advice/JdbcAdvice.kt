@@ -9,27 +9,29 @@ import net.bytebuddy.asm.Advice
 /**
  * Advice for JDBC PreparedStatement instrumentation.
  * Intercepts execute methods to capture SQL queries and timings.
+ *
+ * ThreadLocal stacks are used instead of @Advice.Local to avoid null-initialization
+ * issues: @Advice.Local object-type locals start as null, making list operations
+ * throw NPE before ByteBuddy can propagate any value.
  */
 class JdbcAdvice {
-    
+
     companion object {
+        private val startTimeStack = ThreadLocal.withInitial { ArrayDeque<Long>() }
+        private val spanIdStack = ThreadLocal.withInitial { ArrayDeque<String>() }
+
         /**
-         * Entry advice - captures start time and SQL query.
+         * Entry advice - captures start time and generates a new span ID.
          */
         @JvmStatic
         @Advice.OnMethodEnter
-        fun onEnter(
-            @Advice.This statement: Any,
-            @Advice.Origin("#m") methodName: String,
-            @Advice.Local("startTime") startTime: MutableList<Long>,
-            @Advice.Local("spanId") spanId: MutableList<String>
-        ) {
+        fun onEnter() {
             try {
-                startTime.add(System.nanoTime())
-                
+                startTimeStack.get().addLast(System.nanoTime())
+
                 val currentSpanId = ContextManager.generateSpanId()
-                spanId.add(currentSpanId)
-                
+                spanIdStack.get().addLast(currentSpanId)
+
                 // Store current span as parent for nested operations
                 val previousSpanId = ContextManager.getSpanId()
                 if (previousSpanId != null) {
@@ -40,7 +42,7 @@ class JdbcAdvice {
                 // Suppress errors to avoid crashing host application
             }
         }
-        
+
         /**
          * Exit advice - calculates duration and creates span.
          */
@@ -49,30 +51,30 @@ class JdbcAdvice {
         fun onExit(
             @Advice.This statement: Any,
             @Advice.Origin("#m") methodName: String,
-            @Advice.Local("startTime") startTime: List<Long>,
-            @Advice.Local("spanId") spanId: List<String>,
             @Advice.Thrown thrown: Throwable?
         ) {
             try {
-                if (startTime.isEmpty() || spanId.isEmpty()) return
-                
+                val startDeque = startTimeStack.get()
+                val spanDeque = spanIdStack.get()
+                if (startDeque.isEmpty() || spanDeque.isEmpty()) return
+
+                val startTime = startDeque.removeLast()
+                val currentSpanId = spanDeque.removeLast()
                 val endTime = System.nanoTime()
-                val duration = endTime - startTime[0]
-                
+
                 val traceId = ContextManager.getOrCreateTraceId()
-                val currentSpanId = spanId[0]
                 val parentSpanId = ContextManager.getParentSpanId()
-                
+
                 // Try to extract SQL query from PreparedStatement
                 val sqlQuery = extractSqlQuery(statement)
-                
+
                 val attributes = mutableMapOf<String, String>()
                 attributes["db.system"] = "jdbc"
                 attributes["db.operation"] = methodName
                 if (sqlQuery != null) {
                     attributes["db.statement"] = sqlQuery
                 }
-                
+
                 val status = if (thrown != null) {
                     attributes["error"] = "true"
                     attributes["error.type"] = thrown.javaClass.name
@@ -81,7 +83,7 @@ class JdbcAdvice {
                 } else {
                     "OK"
                 }
-                
+
                 val span = Span.newBuilder()
                     .setTraceId(traceId)
                     .setSpanId(currentSpanId)
@@ -90,49 +92,49 @@ class JdbcAdvice {
                             setParentSpanId(parentSpanId)
                         }
                     }
-                    .setName("jdbc.${methodName}")
+                    .setName("jdbc.$methodName")
                     .setKind(SpanKind.SPAN_KIND_DB)
-                    .setStartTimeUnixNano(startTime[0])
+                    .setStartTimeUnixNano(startTime)
                     .setEndTimeUnixNano(endTime)
                     .putAllAttributes(attributes)
                     .setStatus(status)
                     .build()
-                
+
                 SpanReporter.reportSpan(span)
             } catch (e: Throwable) {
                 // Suppress errors to avoid crashing host application
             }
         }
-        
+
         /**
          * Attempt to extract SQL query from PreparedStatement.
-         * This is implementation-specific and may not work for all JDBC drivers.
+         * Tries common reflection-based field names first, then falls back to toString().
          */
         private fun extractSqlQuery(statement: Any): String? {
-            try {
-                // Try to access the SQL string through reflection
-                val sqlField = statement.javaClass.getDeclaredField("sql")
-                sqlField.isAccessible = true
-                return sqlField.get(statement)?.toString()
-            } catch (e: Exception) {
-                // Try alternate field names used by different JDBC drivers
+            for (fieldName in listOf("sql", "originalSql", "commandText")) {
                 try {
-                    val originalSqlField = statement.javaClass.getDeclaredField("originalSql")
-                    originalSqlField.isAccessible = true
-                    return originalSqlField.get(statement)?.toString()
-                } catch (e2: Exception) {
-                    // If we can't extract the SQL, use toString which often contains it
-                    try {
-                        val str = statement.toString()
-                        if (str.contains("sql=")) {
-                            return str.substringAfter("sql=").substringBefore(",").trim()
+                    var clazz: Class<*>? = statement.javaClass
+                    while (clazz != null) {
+                        try {
+                            val field = clazz.getDeclaredField(fieldName)
+                            field.isAccessible = true
+                            val value = field.get(statement)?.toString()
+                            if (!value.isNullOrEmpty()) return value
+                            break
+                        } catch (_: NoSuchFieldException) {
+                            clazz = clazz.superclass
                         }
-                    } catch (e3: Exception) {
-                        // Ignore
                     }
+                } catch (_: Exception) {
+                    // Try next field name
                 }
             }
-            return null
+            // Fall back to toString() – many JDBC drivers include the SQL there
+            return try {
+                statement.toString().takeIf { it.isNotEmpty() }
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 }

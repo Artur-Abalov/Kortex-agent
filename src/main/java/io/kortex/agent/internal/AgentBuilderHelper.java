@@ -17,7 +17,7 @@ public class AgentBuilderHelper {
                 .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
                 .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
                 .with(AgentBuilder.InitializationStrategy.NoOp.INSTANCE)
-                .with(AgentBuilder.Listener.StreamWriting.toSystemOut())
+                .with(AgentBuilder.Listener.NoOp.INSTANCE)
                 .ignore(nameStartsWith("net.bytebuddy."))
                 .ignore(nameStartsWith("io.kortex."))
                 .ignore(nameStartsWith("java."))
