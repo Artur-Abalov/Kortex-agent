@@ -2,6 +2,7 @@ package io.kortex.agent.advice
 
 import io.kortex.agent.ContextManager
 import io.kortex.agent.SpanReporter
+import io.kortex.agent.sanitization.SqlSanitizer
 import io.kortex.proto.Span
 import io.kortex.proto.SpanKind
 import net.bytebuddy.asm.Advice
@@ -72,7 +73,7 @@ class JdbcAdvice {
                 attributes["db.system"] = "jdbc"
                 attributes["db.operation"] = methodName
                 if (sqlQuery != null) {
-                    attributes["db.statement"] = sqlQuery
+                    attributes["db.statement"] = SqlSanitizer.sanitize(sqlQuery) ?: sqlQuery
                 }
 
                 val status = if (thrown != null) {

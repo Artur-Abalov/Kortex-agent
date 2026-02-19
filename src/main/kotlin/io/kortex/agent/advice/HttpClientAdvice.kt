@@ -2,6 +2,7 @@ package io.kortex.agent.advice
 
 import io.kortex.agent.ContextManager
 import io.kortex.agent.SpanReporter
+import io.kortex.agent.sanitization.HeaderSanitizer
 import io.kortex.proto.Span
 import io.kortex.proto.SpanKind
 import net.bytebuddy.asm.Advice
@@ -108,6 +109,23 @@ class HttpClientAdvice {
                         }
                     } catch (_: Exception) {
                         // Ignore if we can't extract details
+                    }
+
+                    // Capture headers in a sanitized manner
+                    try {
+                        val headersMethod = request.javaClass.getMethod("headers")
+                        val headers = headersMethod.invoke(request)
+                        if (headers != null) {
+                            val mapMethod = headers.javaClass.getMethod("map")
+                            @Suppress("UNCHECKED_CAST")
+                            val headerMap = mapMethod.invoke(headers) as? Map<String, List<String>>
+                            headerMap?.forEach { (name, values) ->
+                                val sanitizedValues = values.map { HeaderSanitizer.sanitize(name, it) }
+                                attributes["http.request.header.$name"] = sanitizedValues.joinToString(", ")
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // Ignore if we can't extract headers
                     }
                 }
 

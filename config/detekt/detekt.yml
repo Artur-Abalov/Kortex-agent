@@ -1,0 +1,55 @@
+build:
+  maxIssues: 0
+  weights:
+    complexity: 2
+    style: 1
+    potential-bugs: 2
+
+complexity:
+  TooManyFunctions:
+    active: true
+    thresholdInFiles: 25
+    thresholdInClasses: 25
+    thresholdInInterfaces: 15
+    thresholdInObjects: 15
+    thresholdInEnums: 10
+
+potential-bugs:
+  active: true
+  CastToNullableType:
+    active: true
+  DoubleMutabilityForCollection:
+    active: true
+  UnreachableCatchBlock:
+    active: true
+  UnsafeCallOnNullableType:
+    active: true
+  UselessPostfixExpression:
+    active: true
+
+style:
+  active: true
+  ForbiddenMethodCall:
+    active: true
+    methods:
+      - 'java.io.PrintStream.println'
+      - 'java.io.PrintStream.print'
+
+exceptions:
+  active: true
+  TooGenericExceptionCaught:
+    active: true
+    exceptionNames:
+      - 'ArrayIndexOutOfBoundsException'
+      - 'Error'
+      - 'IllegalMonitorStateException'
+      - 'IndexOutOfBoundsException'
+      - 'NullPointerException'
+  SwallowedException:
+    active: true
+    allowedExceptionNameRegex: '_|(ignore|expected).*'
+
+performance:
+  active: true
+  SpreadOperator:
+    active: true
