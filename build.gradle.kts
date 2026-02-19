@@ -30,6 +30,8 @@ dependencies {
     // Testing
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
+    testImplementation("com.h2database:h2:2.2.224")
+    testImplementation("javax.annotation:javax.annotation-api:1.3.2")
 }
 
 java {
@@ -61,6 +63,8 @@ tasks {
     
     test {
         useJUnitPlatform()
+        dependsOn(shadowJar)
+        systemProperty("agent.jar.path", shadowJar.get().archiveFile.get().asFile.absolutePath)
     }
     
     processResources {
