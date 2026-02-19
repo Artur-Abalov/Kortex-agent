@@ -121,6 +121,8 @@ dependencyCheck {
     // Suppress false positives via suppression file if needed
     suppressionFiles = listOf("config/owasp-suppressions.xml")
     analyzers.assemblyEnabled = false
+    // Use NVD API key when available (highly recommended for reliable NVD access)
+    nvd.apiKey = System.getenv("NVD_API_KEY") ?: ""
 }
 
 // ── License compliance check ─────────────────────────────────────────────
