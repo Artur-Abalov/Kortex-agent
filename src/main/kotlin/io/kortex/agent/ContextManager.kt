@@ -80,8 +80,7 @@ object ContextManager {
      * Generate a new trace ID (32 hex characters for W3C compliance).
      */
     private fun generateTraceId(): String {
-        return UUID.randomUUID().toString().replace("-", "") + 
-               UUID.randomUUID().toString().replace("-", "").substring(0, 0)
+        return UUID.randomUUID().toString().replace("-", "")
     }
     
     /**
