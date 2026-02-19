@@ -102,9 +102,9 @@ class HttpServerAdvice {
                             val getHeaderNamesMethod = request.javaClass.getMethod("getHeaderNames")
                             val headerNames = getHeaderNamesMethod.invoke(request)
                             if (headerNames is java.util.Enumeration<*>) {
+                                val getHdr = request.javaClass.getMethod("getHeader", String::class.java)
                                 for (name in headerNames) {
                                     val headerName = name as? String ?: continue
-                                    val getHdr = request.javaClass.getMethod("getHeader", String::class.java)
                                     val headerValue = getHdr.invoke(request, headerName) as? String ?: continue
                                     attributes["http.request.header.$headerName"] =
                                         HeaderSanitizer.sanitize(headerName, headerValue)

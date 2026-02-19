@@ -120,8 +120,8 @@ class HttpClientAdvice {
                             @Suppress("UNCHECKED_CAST")
                             val headerMap = mapMethod.invoke(headers) as? Map<String, List<String>>
                             headerMap?.forEach { (name, values) ->
-                                attributes["http.request.header.$name"] =
-                                    HeaderSanitizer.sanitize(name, values.joinToString(", "))
+                                val sanitizedValues = values.map { HeaderSanitizer.sanitize(name, it) }
+                                attributes["http.request.header.$name"] = sanitizedValues.joinToString(", ")
                             }
                         }
                     } catch (_: Exception) {
