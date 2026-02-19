@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package kortex;
+
+option java_package = "io.kortex.proto";
+option java_outer_classname = "SpanProto";
+option java_multiple_files = true;
+
+// SpanKind indicates the type of span
+enum SpanKind {
+  SPAN_KIND_UNSPECIFIED = 0;
+  SPAN_KIND_INTERNAL = 1;
+  SPAN_KIND_SERVER = 2;
+  SPAN_KIND_CLIENT = 3;
+  SPAN_KIND_PRODUCER = 4;
+  SPAN_KIND_CONSUMER = 5;
+  SPAN_KIND_DB = 6;
+}
+
+// Span represents a single operation
+message Span {
+  string trace_id = 1;
+  string span_id = 2;
+  string parent_span_id = 3;
+  string name = 4;
+  SpanKind kind = 5;
+  int64 start_time_unix_nano = 6;
+  int64 end_time_unix_nano = 7;
+  map<string, string> attributes = 8;
+  string status = 9;
+}
+
+// SpanBatch is a collection of spans
+message SpanBatch {
+  repeated Span spans = 1;
+}
+
+// SpanService for sending spans to Kortex Core
+service SpanService {
+  rpc SendSpans(SpanBatch) returns (SendSpansResponse);
+}
+
+message SendSpansResponse {
+  bool success = 1;
+  string message = 2;
+}
