@@ -120,10 +120,10 @@ class JdbcAdvice {
                             field.isAccessible = true
                             val value = field.get(statement)?.toString()
                             if (!value.isNullOrEmpty()) return value
-                            break
                         } catch (_: NoSuchFieldException) {
-                            clazz = clazz.superclass
+                            // field not in this class, check superclass
                         }
+                        clazz = clazz.superclass
                     }
                 } catch (_: Exception) {
                     // Try next field name

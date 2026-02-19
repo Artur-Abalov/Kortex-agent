@@ -4,6 +4,7 @@ import io.kortex.proto.SpanKind
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.io.OutputStream
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -196,7 +197,7 @@ class AgentIntegrationTest {
         // Drain stdout/stderr in a daemon thread to prevent the child process
         // from blocking on a full pipe buffer (the agent produces verbose output).
         Thread({
-            process.inputStream.use { it.copyTo(java.io.OutputStream.nullOutputStream()) }
+            process.inputStream.use { it.copyTo(OutputStream.nullOutputStream()) }
         }, "child-output-drainer").apply {
             isDaemon = true
             start()
