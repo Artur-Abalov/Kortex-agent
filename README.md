@@ -1,122 +1,210 @@
-# Kortex Agent
+<div align="center">
 
-A Java Agent written in Kotlin to provide automated distributed tracing for SQL (JDBC) and HTTP requests.
+```
+╔═══════════════════════════════════════════════╗
+║                                               ║
+║   ██╗  ██╗ ██████╗ ██████╗ ████████╗███████╗ ║
+║   ██║ ██╔╝██╔═══██╗██╔══██╗╚══██╔══╝██╔════╝ ║
+║   █████╔╝ ██║   ██║██████╔╝   ██║   █████╗   ║
+║   ██╔═██╗ ██║   ██║██╔══██╗   ██║   ██╔══╝   ║
+║   ██║  ██╗╚██████╔╝██║  ██║   ██║   ███████╗ ║
+║   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ║
+║                    AGENT                      ║
+╚═══════════════════════════════════════════════╝
+```
+
+**Zero-overhead distributed tracing for the JVM**
+
+[![Kotlin](https://img.shields.io/badge/Kotlin-1.9+-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Java](https://img.shields.io/badge/JDK-11+-ED8B00?style=flat-square&logo=openjdk&logoColor=white)](https://openjdk.org)
+[![gRPC](https://img.shields.io/badge/gRPC-transport-00ADD8?style=flat-square)](https://grpc.io)
+[![W3C Trace Context](https://img.shields.io/badge/W3C-Trace%20Context-005A9C?style=flat-square)](https://www.w3.org/TR/trace-context/)
+[![License](https://img.shields.io/badge/License-Proprietary-gray?style=flat-square)](./LICENSE)
+
+</div>
+
+---
+
+## What Is Kortex Agent?
+
+Kortex Agent is a **Java instrumentation agent** written in Kotlin that automatically instruments your JVM application for distributed tracing — with **no code changes required**. Attach it via `-javaagent` and it instantly begins capturing SQL queries, incoming HTTP requests, and outgoing HTTP calls, reporting structured spans to your Kortex Core backend via gRPC.
+
+Built on [ByteBuddy](https://bytebuddy.net/), it injects tracing logic at the bytecode level using the Advice pattern, keeping runtime overhead minimal and your application code pristine.
+
+---
 
 ## Features
 
-- **JDBC Instrumentation**: Automatically traces SQL queries executed via `PreparedStatement`
-- **HTTP Server Tracing**: Captures incoming HTTP requests (Jakarta/Javax Servlet)
-- **HTTP Client Tracing**: Traces outgoing HTTP requests (java.net.http.HttpClient)
-- **W3C Trace Context**: Full support for W3C traceparent header propagation
-- **Async Reporting**: Non-blocking span collection and batch reporting via gRPC
-- **Zero Footprint**: Uses ByteBuddy Advice (code templates) for minimal overhead
+| Capability | Details |
+|---|---|
+| 🗄️ **JDBC Instrumentation** | Traces all `PreparedStatement` executions — queries, updates, and batch operations |
+| 🌐 **HTTP Server Tracing** | Captures incoming requests via Jakarta & Javax Servlet APIs |
+| 🔗 **HTTP Client Tracing** | Instruments outgoing calls through `java.net.http.HttpClient` |
+| 📡 **W3C Trace Context** | Full `traceparent` header propagation for end-to-end distributed traces |
+| ⚡ **Async Reporting** | Non-blocking span collection via `LinkedBlockingQueue` with batched gRPC delivery |
+| 🪶 **Zero Footprint** | ByteBuddy Advice (compile-time code templates) — no proxies, no reflection overhead |
 
-## Building
+---
 
-Build the shadow JAR containing all dependencies:
+## Quick Start
+
+### 1. Build
 
 ```bash
 ./gradlew clean build
 ```
 
-The agent JAR will be created at `build/libs/kortex-agent-1.0.0.jar`.
+The agent JAR will be produced at:
 
-## Usage
-
-Attach the agent to your Java application using the `-javaagent` flag:
-
-```bash
-java -javaagent:path/to/kortex-agent-1.0.0.jar=host=localhost,port=9090 -jar your-application.jar
+```
+build/libs/kortex-agent-1.0.0.jar
 ```
 
-### Agent Arguments
+### 2. Attach
 
-Configure the agent using comma-separated key=value pairs:
+Prepend the `-javaagent` flag to your application's startup command:
 
-- `host`: Kortex Core gRPC server hostname (default: `localhost`)
-- `port`: Kortex Core gRPC server port (default: `9090`)
-
-Example:
 ```bash
-java -javaagent:kortex-agent-1.0.0.jar=host=trace-server,port=8080 -jar app.jar
+java -javaagent:path/to/kortex-agent-1.0.0.jar=host=localhost,port=9090 \
+     -jar your-application.jar
 ```
 
-## Architecture
+### 3. Configure
 
-### Components
+Pass configuration as comma-separated `key=value` pairs in the agent argument string:
 
-1. **KortexAgent** - Entry point with premain method that sets up ByteBuddy instrumentation
-2. **ContextManager** - Thread-local trace context management with W3C traceparent support
-3. **SpanReporter** - Async span reporter with batching and gRPC client
-4. **Advice Classes** - ByteBuddy advice for JDBC, HTTP server, and HTTP client instrumentation
+| Argument | Default | Description |
+|---|---|---|
+| `host` | `localhost` | Hostname of the Kortex Core gRPC server |
+| `port` | `9090` | Port of the Kortex Core gRPC server |
 
-### Instrumentation Points
+**Example — custom backend:**
 
-- **JDBC**: `java.sql.PreparedStatement.{execute, executeQuery, executeUpdate}`
-- **HTTP Server**: `jakarta.servlet.http.HttpServlet.{service, doGet, doPost, doPut, doDelete}`
-- **HTTP Client**: `java.net.http.HttpClient.{send, sendAsync}`
+```bash
+java -javaagent:kortex-agent-1.0.0.jar=host=trace-server,port=8080 \
+     -jar app.jar
+```
 
-## How It Works
-
-1. The agent is loaded by the JVM via the premain method
-2. ByteBuddy sets up transformers for target classes
-3. When instrumented methods are called, Advice code captures timing and context
-4. Spans are queued in a LinkedBlockingQueue
-5. A background daemon thread sends batches to Kortex Core via gRPC
+---
 
 ## Span Data
 
-Each span includes:
+Every captured operation is reported as a structured span:
 
-- **trace_id**: W3C-compliant 32-character hex trace ID
-- **span_id**: 16-character hex span ID
-- **parent_span_id**: Parent span ID for linking
-- **name**: Operation name (e.g., "jdbc.executeQuery", "HTTP GET /api/users")
-- **kind**: Span kind (DB, SERVER, CLIENT)
-- **start_time_unix_nano**: Start timestamp in nanoseconds
-- **end_time_unix_nano**: End timestamp in nanoseconds
-- **attributes**: Key-value metadata (SQL query, HTTP method, status, etc.)
-- **status**: OK or ERROR
+```
+┌─────────────────────────────────────────────────────────┐
+│  Span                                                   │
+├─────────────────────┬───────────────────────────────────┤
+│ trace_id            │ 32-char hex  (W3C compliant)      │
+│ span_id             │ 16-char hex                       │
+│ parent_span_id      │ 16-char hex  (for linking)        │
+│ name                │ "jdbc.executeQuery", "HTTP GET /…" │
+│ kind                │ DB | SERVER | CLIENT              │
+│ start_time_unix_nano│ nanosecond precision timestamp    │
+│ end_time_unix_nano  │ nanosecond precision timestamp    │
+│ attributes          │ SQL query, HTTP method, status…   │
+│ status              │ OK | ERROR                        │
+└─────────────────────┴───────────────────────────────────┘
+```
 
-## Development
+---
 
-### Prerequisites
+## Architecture
 
-- JDK 11 or higher
-- Gradle 8.5+
+```
+Your Application
+       │
+       ▼
+┌─────────────────────────────────────────────────────────┐
+│                     JVM + Kortex Agent                  │
+│                                                         │
+│  ┌─────────────┐    ┌───────────────┐                   │
+│  │ KortexAgent │───▶│  ByteBuddy    │  Transforms target │
+│  │  (premain)  │    │  Transformers │  classes at load   │
+│  └─────────────┘    └───────┬───────┘                   │
+│                             │                           │
+│              ┌──────────────┼──────────────┐            │
+│              ▼              ▼              ▼            │
+│       ┌────────────┐ ┌──────────┐ ┌─────────────┐      │
+│       │ JDBC       │ │ HTTP     │ │ HTTP Client │      │
+│       │ Advice     │ │ Server   │ │ Advice      │      │
+│       └──────┬─────┘ │ Advice   │ └──────┬──────┘      │
+│              │       └────┬─────┘        │              │
+│              └────────────┼──────────────┘              │
+│                           ▼                             │
+│                  ┌────────────────┐                     │
+│                  │ ContextManager │  Thread-local trace  │
+│                  │ (W3C context)  │  propagation         │
+│                  └───────┬────────┘                     │
+│                          ▼                              │
+│                  ┌────────────────┐                     │
+│                  │  SpanReporter  │  LinkedBlockingQueue │
+│                  │  (async batch) │  + daemon thread     │
+│                  └───────┬────────┘                     │
+└──────────────────────────│──────────────────────────────┘
+                           │ gRPC
+                           ▼
+                  ┌────────────────┐
+                  │  Kortex Core   │
+                  └────────────────┘
+```
 
-### Project Structure
+### Instrumentation Points
+
+| Layer | Intercepted Methods |
+|---|---|
+| **JDBC** | `PreparedStatement.execute`, `.executeQuery`, `.executeUpdate` |
+| **HTTP Server** | `HttpServlet.service`, `.doGet`, `.doPost`, `.doPut`, `.doDelete` |
+| **HTTP Client** | `HttpClient.send`, `.sendAsync` |
+
+### How It Works
+
+1. The JVM invokes `premain` before your application's `main` method
+2. ByteBuddy installs transformers that rewrite matching classes at load time
+3. Advice code surrounds each instrumented method, capturing start/end timestamps and context
+4. Completed spans are enqueued into a `LinkedBlockingQueue` (non-blocking for your threads)
+5. A background daemon thread drains the queue and sends batches to Kortex Core over gRPC
+
+---
+
+## Project Structure
 
 ```
 kortex-agent/
 ├── src/main/
-│   ├── java/io/kortex/agent/internal/  # Java helpers for ByteBuddy
-│   ├── kotlin/io/kortex/agent/         # Main Kotlin source
-│   │   ├── advice/                     # Instrumentation advice
-│   │   ├── ContextManager.kt
-│   │   ├── KortexAgent.kt
-│   │   └── SpanReporter.kt
-│   └── proto/                          # Protobuf definitions
-├── build.gradle.kts                    # Gradle build configuration
+│   ├── java/io/kortex/agent/internal/   # Java helpers for ByteBuddy interop
+│   ├── kotlin/io/kortex/agent/
+│   │   ├── advice/                       # Instrumentation advice classes
+│   │   │   ├── JdbcAdvice.kt
+│   │   │   ├── HttpServerAdvice.kt
+│   │   │   └── HttpClientAdvice.kt
+│   │   ├── ContextManager.kt             # Thread-local W3C trace context
+│   │   ├── KortexAgent.kt                # Agent entry point (premain)
+│   │   └── SpanReporter.kt              # Async batching + gRPC client
+│   └── proto/                            # Protobuf definitions
+├── build.gradle.kts
 └── settings.gradle.kts
 ```
 
-### Testing
+---
 
-To test the agent, create a simple application that uses JDBC and HTTP:
+## Testing
+
+Create a minimal test application that exercises both JDBC and HTTP:
 
 ```java
 import java.sql.*;
 import java.net.http.*;
+import java.net.URI;
 
 public class TestApp {
     public static void main(String[] args) throws Exception {
-        // JDBC test
+        // JDBC — will produce a DB span
         Connection conn = DriverManager.getConnection("jdbc:h2:mem:test");
         PreparedStatement stmt = conn.prepareStatement("SELECT 1");
         stmt.executeQuery();
-        
-        // HTTP client test
+
+        // HTTP Client — will produce a CLIENT span
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create("http://example.com"))
@@ -126,11 +214,23 @@ public class TestApp {
 }
 ```
 
-Run with the agent:
+Run with the agent attached:
+
 ```bash
 java -javaagent:kortex-agent-1.0.0.jar TestApp
 ```
 
-## License
+---
 
-Copyright © 2024
+## Prerequisites
+
+- **JDK 11** or higher
+- **Gradle 8.5+**
+
+---
+
+<div align="center">
+
+Copyright © 2024 Kortex · All rights reserved
+
+</div>
