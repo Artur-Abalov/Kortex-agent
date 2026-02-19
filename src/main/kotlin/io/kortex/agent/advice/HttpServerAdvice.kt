@@ -2,6 +2,7 @@ package io.kortex.agent.advice
 
 import io.kortex.agent.ContextManager
 import io.kortex.agent.SpanReporter
+import io.kortex.agent.sanitization.HeaderSanitizer
 import io.kortex.proto.Span
 import io.kortex.proto.SpanKind
 import net.bytebuddy.asm.Advice
@@ -95,6 +96,23 @@ class HttpServerAdvice {
                         val getQueryStringMethod = request.javaClass.getMethod("getQueryString")
                         val queryString = getQueryStringMethod.invoke(request) as? String
                         if (queryString != null) attributes["http.query"] = queryString
+
+                        // Capture headers in a sanitized manner
+                        try {
+                            val getHeaderNamesMethod = request.javaClass.getMethod("getHeaderNames")
+                            val headerNames = getHeaderNamesMethod.invoke(request)
+                            if (headerNames is java.util.Enumeration<*>) {
+                                for (name in headerNames) {
+                                    val headerName = name as? String ?: continue
+                                    val getHdr = request.javaClass.getMethod("getHeader", String::class.java)
+                                    val headerValue = getHdr.invoke(request, headerName) as? String ?: continue
+                                    attributes["http.request.header.$headerName"] =
+                                        HeaderSanitizer.sanitize(headerName, headerValue)
+                                }
+                            }
+                        } catch (_: Exception) {
+                            // Ignore if we can't enumerate headers
+                        }
                     } catch (_: Exception) {
                         // Ignore if we can't extract details
                     }

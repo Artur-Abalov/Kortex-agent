@@ -1,0 +1,34 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <CurrentIssues>
+    <ID>CyclomaticComplexMethod:HttpClientAdvice.kt$HttpClientAdvice.Companion$@JvmStatic @Advice.OnMethodExit(onThrowable = Throwable::class) fun onExit( @Advice.Argument(0) request: Any?, @Advice.Return returnValue: Any?, @Advice.Thrown thrown: Throwable? )</ID>
+    <ID>CyclomaticComplexMethod:HttpServerAdvice.kt$HttpServerAdvice.Companion$@JvmStatic @Advice.OnMethodExit(onThrowable = Throwable::class) fun onExit( @Advice.Argument(0) request: Any?, @Advice.Argument(1) response: Any?, @Advice.Thrown thrown: Throwable? )</ID>
+    <ID>LongMethod:HttpClientAdvice.kt$HttpClientAdvice.Companion$@JvmStatic @Advice.OnMethodExit(onThrowable = Throwable::class) fun onExit( @Advice.Argument(0) request: Any?, @Advice.Return returnValue: Any?, @Advice.Thrown thrown: Throwable? )</ID>
+    <ID>LongMethod:HttpServerAdvice.kt$HttpServerAdvice.Companion$@JvmStatic @Advice.OnMethodExit(onThrowable = Throwable::class) fun onExit( @Advice.Argument(0) request: Any?, @Advice.Argument(1) response: Any?, @Advice.Thrown thrown: Throwable? )</ID>
+    <ID>LoopWithTooManyJumpStatements:HttpServerAdvice.kt$HttpServerAdvice.Companion$for</ID>
+    <ID>MagicNumber:ContextManager.kt$ContextManager$16</ID>
+    <ID>MagicNumber:ContextManager.kt$ContextManager$32</ID>
+    <ID>MagicNumber:ContextManager.kt$ContextManager$4</ID>
+    <ID>MagicNumber:KortexAgent.kt$KortexAgent$9090</ID>
+    <ID>MagicNumber:SpanReporter.kt$SpanReporter$10000</ID>
+    <ID>MagicNumber:SpanReporter.kt$SpanReporter$5</ID>
+    <ID>MagicNumber:SpanReporter.kt$SpanReporter.ReporterTask$100</ID>
+    <ID>MaxLineLength:HttpClientAdvice.kt$HttpClientAdvice.Companion$val headerMethod = request.javaClass.getMethod("header", String::class.java, String::class.java)</ID>
+    <ID>MaxLineLength:HttpClientAdvice.kt$HttpClientAdvice.Companion$val setHeaderMethod = request.javaClass.getMethod("setHeader", String::class.java, String::class.java)</ID>
+    <ID>NestedBlockDepth:HttpClientAdvice.kt$HttpClientAdvice.Companion$@JvmStatic @Advice.OnMethodEnter fun onEnter( @Advice.Argument(0) request: Any? )</ID>
+    <ID>NestedBlockDepth:HttpClientAdvice.kt$HttpClientAdvice.Companion$@JvmStatic @Advice.OnMethodExit(onThrowable = Throwable::class) fun onExit( @Advice.Argument(0) request: Any?, @Advice.Return returnValue: Any?, @Advice.Thrown thrown: Throwable? )</ID>
+    <ID>NestedBlockDepth:HttpServerAdvice.kt$HttpServerAdvice.Companion$@JvmStatic @Advice.OnMethodEnter fun onEnter( @Advice.Argument(0) request: Any?, @Advice.Argument(1) response: Any? )</ID>
+    <ID>NestedBlockDepth:HttpServerAdvice.kt$HttpServerAdvice.Companion$@JvmStatic @Advice.OnMethodExit(onThrowable = Throwable::class) fun onExit( @Advice.Argument(0) request: Any?, @Advice.Argument(1) response: Any?, @Advice.Thrown thrown: Throwable? )</ID>
+    <ID>NestedBlockDepth:JdbcAdvice.kt$JdbcAdvice.Companion$private fun extractSqlQuery(statement: Any): String?</ID>
+    <ID>ReturnCount:ContextManager.kt$ContextManager$fun parseTraceparent(traceparent: String?): Boolean</ID>
+    <ID>SwallowedException:HttpClientAdvice.kt$HttpClientAdvice.Companion$e: Exception</ID>
+    <ID>SwallowedException:HttpClientAdvice.kt$HttpClientAdvice.Companion$e: Throwable</ID>
+    <ID>SwallowedException:HttpServerAdvice.kt$HttpServerAdvice.Companion$e: Throwable</ID>
+    <ID>SwallowedException:JdbcAdvice.kt$JdbcAdvice.Companion$e: Throwable</ID>
+    <ID>UnusedParameter:HttpServerAdvice.kt$HttpServerAdvice.Companion$@Advice.Argument(1) response: Any?</ID>
+    <ID>UtilityClassWithPublicConstructor:HttpClientAdvice.kt$HttpClientAdvice</ID>
+    <ID>UtilityClassWithPublicConstructor:HttpServerAdvice.kt$HttpServerAdvice</ID>
+    <ID>UtilityClassWithPublicConstructor:JdbcAdvice.kt$JdbcAdvice</ID>
+  </CurrentIssues>
+</SmellBaseline>
