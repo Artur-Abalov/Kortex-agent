@@ -47,6 +47,12 @@ class HttpServerAdvice {
                             // Create new trace context if no valid header found
                             ContextManager.getOrCreateTraceId()
                         }
+
+                        // Capture tracestate for end-to-end propagation
+                        val tracestate = getHeaderMethod.invoke(request, "tracestate") as? String
+                        if (!tracestate.isNullOrEmpty()) {
+                            ContextManager.setTraceState(tracestate)
+                        }
                     } catch (_: Exception) {
                         // If we can't extract header, create new context
                         ContextManager.getOrCreateTraceId()
@@ -160,6 +166,10 @@ class HttpServerAdvice {
                         if (parentSpanId != null) {
                             setParentSpanId(ByteString.copyFrom(ContextManager.hexToBytes(parentSpanId)))
                         }
+                        val traceState = ContextManager.getTraceState()
+                        if (!traceState.isNullOrEmpty()) {
+                            setTraceState(traceState)
+                        }
                     }
                     .setName("HTTP $httpMethod $httpTarget")
                     .setKind(SpanKind.SPAN_KIND_SERVER)
@@ -167,6 +177,7 @@ class HttpServerAdvice {
                     .setEndTimeUnixNano(endTime)
                     .addAllAttributes(kvAttributes)
                     .setStatus(spanStatus)
+                    .setFlags(ContextManager.getTraceFlags())
                     .build()
 
                 SpanReporter.reportSpan(span)

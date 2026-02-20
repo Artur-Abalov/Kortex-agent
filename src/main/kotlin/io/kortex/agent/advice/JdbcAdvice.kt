@@ -101,6 +101,10 @@ class JdbcAdvice {
                         if (parentSpanId != null) {
                             setParentSpanId(ByteString.copyFrom(ContextManager.hexToBytes(parentSpanId)))
                         }
+                        val traceState = ContextManager.getTraceState()
+                        if (!traceState.isNullOrEmpty()) {
+                            setTraceState(traceState)
+                        }
                     }
                     .setName("jdbc.$methodName")
                     .setKind(SpanKind.SPAN_KIND_CLIENT)
@@ -108,6 +112,7 @@ class JdbcAdvice {
                     .setEndTimeUnixNano(endTime)
                     .addAllAttributes(kvAttributes)
                     .setStatus(status)
+                    .setFlags(ContextManager.getTraceFlags())
                     .build()
 
                 SpanReporter.reportSpan(span)

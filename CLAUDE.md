@@ -40,7 +40,7 @@ kortex-agent/
 │   │   │       ├── HttpServerAdvice.kt    # Instruments HttpServlet.service/do*
 │   │   │       └── HttpClientAdvice.kt    # Instruments HttpClient.send/sendAsync
 │   │   └── proto/
-│   │       └── span.proto                 # Protobuf schema for Span, SpanBatch, SpanService
+│   │       └── span.proto                 # Protobuf schema for Span, ExportTraceServiceRequest, TraceService
 │   └── test/
 │       └── kotlin/io/kortex/agent/integration/
 │           ├── AgentIntegrationTest.kt    # Black-box integration tests
@@ -60,7 +60,7 @@ kortex-agent/
 3. ByteBuddy rewrites target classes **at class-load time** using the Advice pattern (compile-time code templates — no proxy, no reflection overhead)
 4. Each advice class wraps target methods with `@Advice.OnMethodEnter` / `@Advice.OnMethodExit`
 5. On exit, the advice builds a `Span` proto and calls `SpanReporter.reportSpan()`
-6. A background daemon thread drains the `LinkedBlockingQueue<Span>` (capacity 10 000) and sends batches of up to 100 spans via gRPC every 1 s or when the batch is full
+6. A background daemon thread drains the `LinkedBlockingQueue<Span>` (capacity 10 000) and sends batches of up to 100 spans via `TraceService.Export(ExportTraceServiceRequest)` every 1 s or when the batch is full; the request is wrapped in the OTLP hierarchy `ExportTraceServiceRequest → ResourceSpans → ScopeSpans → Span`
 
 ### Why Java Helper Classes?
 

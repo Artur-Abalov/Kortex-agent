@@ -50,16 +50,23 @@ class HttpClientAdvice {
                 if (request != null) {
                     try {
                         val traceparent = ContextManager.generateTraceparent()
+                        val tracestate = ContextManager.getTraceState()
 
                         // Try to inject header (method varies by HTTP client implementation)
                         try {
                             val setHeaderMethod = request.javaClass.getMethod("setHeader", String::class.java, String::class.java)
                             setHeaderMethod.invoke(request, "traceparent", traceparent)
+                            if (!tracestate.isNullOrEmpty()) {
+                                setHeaderMethod.invoke(request, "tracestate", tracestate)
+                            }
                         } catch (e: Exception) {
                             // Try alternate method for header injection
                             try {
                                 val headerMethod = request.javaClass.getMethod("header", String::class.java, String::class.java)
                                 headerMethod.invoke(request, "traceparent", traceparent)
+                                if (!tracestate.isNullOrEmpty()) {
+                                    headerMethod.invoke(request, "tracestate", tracestate)
+                                }
                             } catch (_: Exception) {
                                 // Silently fail if we can't inject header
                             }
@@ -170,6 +177,10 @@ class HttpClientAdvice {
                         if (parentSpanId != null) {
                             setParentSpanId(ByteString.copyFrom(ContextManager.hexToBytes(parentSpanId)))
                         }
+                        val traceState = ContextManager.getTraceState()
+                        if (!traceState.isNullOrEmpty()) {
+                            setTraceState(traceState)
+                        }
                     }
                     .setName("HTTP $httpMethod $httpUrl")
                     .setKind(SpanKind.SPAN_KIND_CLIENT)
@@ -177,6 +188,7 @@ class HttpClientAdvice {
                     .setEndTimeUnixNano(endTime)
                     .addAllAttributes(kvAttributes)
                     .setStatus(spanStatus)
+                    .setFlags(ContextManager.getTraceFlags())
                     .build()
 
                 SpanReporter.reportSpan(span)

@@ -10,6 +10,9 @@ object ContextManager {
     private val traceIdHolder = ThreadLocal<String>()
     private val spanIdHolder = ThreadLocal<String>()
     private val parentSpanIdHolder = ThreadLocal<String?>()
+    // Default to 0x01 (sampled) for self-started traces; overwritten by parseTraceparent.
+    private val traceFlagsHolder = ThreadLocal.withInitial { 1 }
+    private val traceStateHolder = ThreadLocal<String?>()
     
     /**
      * Get or create a trace ID for the current thread.
@@ -68,12 +71,38 @@ object ContextManager {
     }
     
     /**
+     * Get the W3C trace flags for the current thread (defaults to 1 = sampled).
+     */
+    fun getTraceFlags(): Int = traceFlagsHolder.get()
+
+    /**
+     * Set the W3C trace flags for the current thread.
+     */
+    fun setTraceFlags(flags: Int) {
+        traceFlagsHolder.set(flags)
+    }
+
+    /**
+     * Get the W3C tracestate for the current thread, or null if not set.
+     */
+    fun getTraceState(): String? = traceStateHolder.get()
+
+    /**
+     * Set the W3C tracestate for the current thread.
+     */
+    fun setTraceState(traceState: String?) {
+        traceStateHolder.set(traceState)
+    }
+
+    /**
      * Clear all context for the current thread.
      */
     fun clear() {
         traceIdHolder.remove()
         spanIdHolder.remove()
         parentSpanIdHolder.remove()
+        traceFlagsHolder.remove()
+        traceStateHolder.remove()
     }
     
     /**
@@ -87,6 +116,7 @@ object ContextManager {
      * Parse W3C traceparent header.
      * Format: 00-{trace-id}-{parent-id}-{trace-flags}
      * Example: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+     * Stores trace flags so they can be forwarded on outgoing requests and written to Span.flags.
      */
     fun parseTraceparent(traceparent: String?): Boolean {
         if (traceparent == null) return false
@@ -97,13 +127,16 @@ object ContextManager {
         val version = parts[0]
         val traceId = parts[1]
         val parentId = parts[2]
+        val flagsHex = parts[3]
         
         if (version != "00") return false
         if (traceId.length != 32) return false
         if (parentId.length != 16) return false
+        if (flagsHex.length != 2) return false
         
         setTraceId(traceId)
         setParentSpanId(parentId)
+        setTraceFlags(flagsHex.toIntOrNull(16) ?: 1)
         
         return true
     }
@@ -111,11 +144,13 @@ object ContextManager {
     /**
      * Generate W3C traceparent header.
      * Format: 00-{trace-id}-{parent-id}-{trace-flags}
+     * Uses the trace flags stored on the current thread (default 01 = sampled).
      */
     fun generateTraceparent(): String {
         val traceId = getOrCreateTraceId()
         val spanId = getSpanId() ?: generateSpanId()
-        return "00-$traceId-$spanId-01"
+        val flagsHex = String.format("%02x", getTraceFlags())
+        return "00-$traceId-$spanId-$flagsHex"
     }
 
     /**

@@ -89,6 +89,11 @@ class AgentIntegrationTest {
                 ?.value?.stringValue?.contains("SELECT", ignoreCase = true) == true,
             "db.statement attribute must include the SELECT keyword"
         )
+        assertEquals(
+            1,
+            span.flags and 0xFF,
+            "Span.flags must have the sampled bit set (W3C trace-flags = 0x01)"
+        )
     }
 
     // ── Test Case 2: HTTP Context Propagation ────────────────────────────────
