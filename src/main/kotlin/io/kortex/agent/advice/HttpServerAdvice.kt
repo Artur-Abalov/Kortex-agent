@@ -136,7 +136,9 @@ class HttpServerAdvice {
                     try {
                         val getStatusMethod = response.javaClass.getMethod("getStatus")
                         val statusCode = getStatusMethod.invoke(response) as? Int
-                        if (statusCode != null) kvAttributes.add(buildStringKv("http.status_code", statusCode.toString()))
+                        if (statusCode != null) {
+                            kvAttributes.add(buildStringKv("http.status_code", statusCode.toString()))
+                        }
                     } catch (_: Exception) {
                         // Ignore if we can't extract status
                     }

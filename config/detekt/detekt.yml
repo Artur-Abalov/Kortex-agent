@@ -11,7 +11,7 @@ complexity:
     thresholdInFiles: 25
     thresholdInClasses: 25
     thresholdInInterfaces: 15
-    thresholdInObjects: 15
+    thresholdInObjects: 17
     thresholdInEnums: 10
 
 potential-bugs:

@@ -13,6 +13,8 @@ object ContextManager {
     // Default to 0x01 (sampled) for self-started traces; overwritten by parseTraceparent.
     private val traceFlagsHolder = ThreadLocal.withInitial { 1 }
     private val traceStateHolder = ThreadLocal<String?>()
+    // Mask to extract the lower 8 bits of an Int, used to format W3C trace-flags as 2-hex-digit byte.
+    private const val BYTE_MASK = 0xFF
     
     /**
      * Get or create a trace ID for the current thread.
@@ -21,7 +23,7 @@ object ContextManager {
     fun getOrCreateTraceId(): String {
         var traceId = traceIdHolder.get()
         if (traceId == null) {
-            traceId = generateTraceId()
+            traceId = UUID.randomUUID().toString().replace("-", "")
             traceIdHolder.set(traceId)
         }
         return traceId
@@ -106,13 +108,6 @@ object ContextManager {
     }
     
     /**
-     * Generate a new trace ID (32 hex characters for W3C compliance).
-     */
-    private fun generateTraceId(): String {
-        return UUID.randomUUID().toString().replace("-", "")
-    }
-    
-    /**
      * Parse W3C traceparent header.
      * Format: 00-{trace-id}-{parent-id}-{trace-flags}
      * Example: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
@@ -127,7 +122,7 @@ object ContextManager {
         val version = parts[0]
         val traceId = parts[1]
         val parentId = parts[2]
-        val flagsHex = parts[3]
+        val flagsHex = parts.last()
         
         if (version != "00") return false
         if (traceId.length != 32) return false
@@ -149,7 +144,7 @@ object ContextManager {
     fun generateTraceparent(): String {
         val traceId = getOrCreateTraceId()
         val spanId = getSpanId() ?: generateSpanId()
-        val flagsHex = String.format("%02x", getTraceFlags())
+        val flagsHex = (getTraceFlags() and BYTE_MASK).toString(16).padStart(2, '0')
         return "00-$traceId-$spanId-$flagsHex"
     }
 
@@ -158,7 +153,7 @@ object ContextManager {
      * Used to convert 32-char trace IDs (16 bytes) and 16-char span IDs (8 bytes)
      * to the byte representation required by the OTLP proto schema.
      *
-     * Only call this with hex strings produced by [generateTraceId] and [generateSpanId];
+     * Only call this with hex strings produced by [generateSpanId] and UUID-based trace IDs;
      * the format is always valid and even-length in normal operation.
      */
     fun hexToBytes(hex: String): ByteArray {

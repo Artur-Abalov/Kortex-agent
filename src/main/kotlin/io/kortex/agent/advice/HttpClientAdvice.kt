@@ -132,7 +132,9 @@ class HttpClientAdvice {
                             val headerMap = mapMethod.invoke(headers) as? Map<String, List<String>>
                             headerMap?.forEach { (name, values) ->
                                 val sanitizedValues = values.map { HeaderSanitizer.sanitize(name, it) }
-                                kvAttributes.add(buildStringKv("http.request.header.$name", sanitizedValues.joinToString(", ")))
+                                kvAttributes.add(
+                                    buildStringKv("http.request.header.$name", sanitizedValues.joinToString(", "))
+                                )
                             }
                         }
                     } catch (_: Exception) {
