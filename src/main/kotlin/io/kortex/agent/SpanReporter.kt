@@ -29,10 +29,14 @@ object SpanReporter {
     private const val BATCH_SIZE = 100
     private const val BATCH_TIMEOUT_MS = 1000L
 
+    // Agent name and version used to populate InstrumentationScope
+    private const val AGENT_NAME = "io.kortex.agent"
+    private const val AGENT_VERSION = "1.0.0"
+
     // InstrumentationScope identifying this agent as the telemetry producer
     private val agentScope: InstrumentationScope = InstrumentationScope.newBuilder()
-        .setName("io.kortex.agent")
-        .setVersion("1.0.0")
+        .setName(AGENT_NAME)
+        .setVersion(AGENT_VERSION)
         .build()
 
     // Resource representing the monitored service (no attributes by default)

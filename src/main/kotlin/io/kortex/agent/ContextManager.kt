@@ -122,7 +122,12 @@ object ContextManager {
      * Convert a lowercase hex string to a byte array.
      * Used to convert 32-char trace IDs (16 bytes) and 16-char span IDs (8 bytes)
      * to the byte representation required by the OTLP proto schema.
+     *
+     * Only call this with hex strings produced by [generateTraceId] and [generateSpanId];
+     * the format is always valid and even-length in normal operation.
      */
-    fun hexToBytes(hex: String): ByteArray =
-        ByteArray(hex.length / 2) { i -> hex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
+    fun hexToBytes(hex: String): ByteArray {
+        require(hex.length % 2 == 0) { "Invalid hex string: length must be even, got ${hex.length}" }
+        return ByteArray(hex.length / 2) { i -> hex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
+    }
 }
