@@ -1,10 +1,14 @@
 package io.kortex.agent.advice
 
+import com.google.protobuf.ByteString
 import io.kortex.agent.ContextManager
 import io.kortex.agent.SpanReporter
 import io.kortex.agent.sanitization.HeaderSanitizer
+import io.kortex.proto.AnyValue
+import io.kortex.proto.KeyValue
 import io.kortex.proto.Span
 import io.kortex.proto.SpanKind
+import io.kortex.proto.Status
 import net.bytebuddy.asm.Advice
 
 /**
@@ -43,6 +47,12 @@ class HttpServerAdvice {
                             // Create new trace context if no valid header found
                             ContextManager.getOrCreateTraceId()
                         }
+
+                        // Capture tracestate for end-to-end propagation
+                        val tracestate = getHeaderMethod.invoke(request, "tracestate") as? String
+                        if (!tracestate.isNullOrEmpty()) {
+                            ContextManager.setTraceState(tracestate)
+                        }
                     } catch (_: Exception) {
                         // If we can't extract header, create new context
                         ContextManager.getOrCreateTraceId()
@@ -80,22 +90,22 @@ class HttpServerAdvice {
                 val parentSpanId = ContextManager.getParentSpanId()
 
                 // Extract request details
-                val attributes = mutableMapOf<String, String>()
-                attributes["http.flavor"] = "HTTP/1.1"
+                val kvAttributes = mutableListOf<KeyValue>()
+                kvAttributes.add(buildStringKv("http.flavor", "HTTP/1.1"))
 
                 if (request != null) {
                     try {
                         val getMethodMethod = request.javaClass.getMethod("getMethod")
                         val method = getMethodMethod.invoke(request) as? String
-                        if (method != null) attributes["http.method"] = method
+                        if (method != null) kvAttributes.add(buildStringKv("http.method", method))
 
                         val getRequestURIMethod = request.javaClass.getMethod("getRequestURI")
                         val uri = getRequestURIMethod.invoke(request) as? String
-                        if (uri != null) attributes["http.target"] = uri
+                        if (uri != null) kvAttributes.add(buildStringKv("http.target", uri))
 
                         val getQueryStringMethod = request.javaClass.getMethod("getQueryString")
                         val queryString = getQueryStringMethod.invoke(request) as? String
-                        if (queryString != null) attributes["http.query"] = queryString
+                        if (queryString != null) kvAttributes.add(buildStringKv("http.query", queryString))
 
                         // Capture headers in a sanitized manner
                         try {
@@ -106,8 +116,12 @@ class HttpServerAdvice {
                                 for (name in headerNames) {
                                     val headerName = name as? String ?: continue
                                     val headerValue = getHdr.invoke(request, headerName) as? String ?: continue
-                                    attributes["http.request.header.$headerName"] =
-                                        HeaderSanitizer.sanitize(headerName, headerValue)
+                                    kvAttributes.add(
+                                        buildStringKv(
+                                            "http.request.header.$headerName",
+                                            HeaderSanitizer.sanitize(headerName, headerValue)
+                                        )
+                                    )
                                 }
                             }
                         } catch (_: Exception) {
@@ -121,36 +135,51 @@ class HttpServerAdvice {
                 if (response != null) {
                     try {
                         val getStatusMethod = response.javaClass.getMethod("getStatus")
-                        val status = getStatusMethod.invoke(response) as? Int
-                        if (status != null) attributes["http.status_code"] = status.toString()
+                        val statusCode = getStatusMethod.invoke(response) as? Int
+                        if (statusCode != null) {
+                            kvAttributes.add(buildStringKv("http.status_code", statusCode.toString()))
+                        }
                     } catch (_: Exception) {
                         // Ignore if we can't extract status
                     }
                 }
 
-                val status = if (thrown != null) {
-                    attributes["error"] = "true"
-                    attributes["error.type"] = thrown.javaClass.name
-                    attributes["error.message"] = thrown.message ?: ""
-                    "ERROR"
+                val spanStatus = if (thrown != null) {
+                    kvAttributes.add(buildStringKv("error", "true"))
+                    kvAttributes.add(buildStringKv("error.type", thrown.javaClass.name))
+                    kvAttributes.add(buildStringKv("error.message", thrown.message ?: ""))
+                    Status.newBuilder()
+                        .setCode(Status.StatusCode.STATUS_CODE_ERROR)
+                        .setMessage(thrown.message ?: "")
+                        .build()
                 } else {
-                    "OK"
+                    Status.newBuilder()
+                        .setCode(Status.StatusCode.STATUS_CODE_OK)
+                        .build()
                 }
 
+                val httpMethod = kvAttributes.find { it.key == "http.method" }?.value?.stringValue ?: "?"
+                val httpTarget = kvAttributes.find { it.key == "http.target" }?.value?.stringValue ?: "?"
+
                 val span = Span.newBuilder()
-                    .setTraceId(traceId)
-                    .setSpanId(currentSpanId)
+                    .setTraceId(ByteString.copyFrom(ContextManager.hexToBytes(traceId)))
+                    .setSpanId(ByteString.copyFrom(ContextManager.hexToBytes(currentSpanId)))
                     .apply {
                         if (parentSpanId != null) {
-                            setParentSpanId(parentSpanId)
+                            setParentSpanId(ByteString.copyFrom(ContextManager.hexToBytes(parentSpanId)))
+                        }
+                        val traceState = ContextManager.getTraceState()
+                        if (!traceState.isNullOrEmpty()) {
+                            setTraceState(traceState)
                         }
                     }
-                    .setName("HTTP ${attributes["http.method"] ?: "?"} ${attributes["http.target"] ?: "?"}")
+                    .setName("HTTP $httpMethod $httpTarget")
                     .setKind(SpanKind.SPAN_KIND_SERVER)
                     .setStartTimeUnixNano(startTime)
                     .setEndTimeUnixNano(endTime)
-                    .putAllAttributes(attributes)
-                    .setStatus(status)
+                    .addAllAttributes(kvAttributes)
+                    .setStatus(spanStatus)
+                    .setFlags(ContextManager.getTraceFlags())
                     .build()
 
                 SpanReporter.reportSpan(span)
@@ -161,5 +190,11 @@ class HttpServerAdvice {
                 ContextManager.clear()
             }
         }
+
+        private fun buildStringKv(key: String, value: String): KeyValue =
+            KeyValue.newBuilder()
+                .setKey(key)
+                .setValue(AnyValue.newBuilder().setStringValue(value).build())
+                .build()
     }
 }

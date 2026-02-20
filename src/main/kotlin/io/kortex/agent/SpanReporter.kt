@@ -1,8 +1,12 @@
 package io.kortex.agent
 
+import io.kortex.proto.ExportTraceServiceRequest
+import io.kortex.proto.InstrumentationScope
+import io.kortex.proto.Resource
+import io.kortex.proto.ResourceSpans
+import io.kortex.proto.ScopeSpans
 import io.kortex.proto.Span
-import io.kortex.proto.SpanBatch
-import io.kortex.proto.SpanServiceGrpc
+import io.kortex.proto.TraceServiceGrpc
 import io.grpc.ManagedChannel
 import io.grpc.ManagedChannelBuilder
 import java.util.concurrent.LinkedBlockingQueue
@@ -11,16 +15,32 @@ import java.util.concurrent.TimeUnit
 /**
  * SpanReporter manages async reporting of spans to Kortex Core.
  * Uses a background daemon thread to batch and send spans via gRPC.
+ *
+ * Spans are sent using the OTLP hierarchy:
+ * ExportTraceServiceRequest → ResourceSpans → ScopeSpans → Span
  */
 object SpanReporter {
     private val spanQueue = LinkedBlockingQueue<Span>(10000)
     private var channel: ManagedChannel? = null
-    private var stub: SpanServiceGrpc.SpanServiceBlockingStub? = null
+    private var stub: TraceServiceGrpc.TraceServiceBlockingStub? = null
     private var reporterThread: Thread? = null
     private var running = false
     
     private const val BATCH_SIZE = 100
     private const val BATCH_TIMEOUT_MS = 1000L
+
+    // Agent name and version used to populate InstrumentationScope
+    private const val AGENT_NAME = "io.kortex.agent"
+    private const val AGENT_VERSION = "1.0.0"
+
+    // InstrumentationScope identifying this agent as the telemetry producer
+    private val agentScope: InstrumentationScope = InstrumentationScope.newBuilder()
+        .setName(AGENT_NAME)
+        .setVersion(AGENT_VERSION)
+        .build()
+
+    // Resource representing the monitored service (no attributes by default)
+    private val serviceResource: Resource = Resource.newBuilder().build()
     
     /**
      * Initialize the reporter with gRPC endpoint.
@@ -34,7 +54,7 @@ object SpanReporter {
                 .usePlaintext()
                 .build()
             
-            stub = SpanServiceGrpc.newBlockingStub(channel)
+            stub = TraceServiceGrpc.newBlockingStub(channel)
             
             running = true
             reporterThread = Thread(ReporterTask(), "KortexSpanReporter").apply {
@@ -129,16 +149,30 @@ object SpanReporter {
             if (spans.isEmpty()) return
             
             try {
-                val batchRequest = SpanBatch.newBuilder()
+                val scopeSpans = ScopeSpans.newBuilder()
+                    .setScope(agentScope)
                     .addAllSpans(spans)
                     .build()
+
+                val resourceSpans = ResourceSpans.newBuilder()
+                    .setResource(serviceResource)
+                    .addScopeSpans(scopeSpans)
+                    .build()
+
+                val request = ExportTraceServiceRequest.newBuilder()
+                    .addResourceSpans(resourceSpans)
+                    .build()
                 
-                val response = stub?.sendSpans(batchRequest)
-                
-                if (response?.success == true) {
+                val response = stub?.export(request)
+
+                val rejected = response?.partialSuccess?.rejectedSpans ?: 0L
+                if (rejected == 0L) {
                     println("[Kortex] Successfully sent batch of ${spans.size} spans")
                 } else {
-                    System.err.println("[Kortex] Failed to send batch: ${response?.message}")
+                    System.err.println(
+                        "[Kortex] Partial failure: $rejected spans rejected — " +
+                            "${response?.partialSuccess?.errorMessage}"
+                    )
                 }
             } catch (e: Exception) {
                 System.err.println("[Kortex] Error sending batch to Kortex Core: ${e.message}")

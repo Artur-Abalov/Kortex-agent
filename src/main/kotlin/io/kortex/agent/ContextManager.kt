@@ -10,6 +10,11 @@ object ContextManager {
     private val traceIdHolder = ThreadLocal<String>()
     private val spanIdHolder = ThreadLocal<String>()
     private val parentSpanIdHolder = ThreadLocal<String?>()
+    // Default to 0x01 (sampled) for self-started traces; overwritten by parseTraceparent.
+    private val traceFlagsHolder = ThreadLocal.withInitial { 1 }
+    private val traceStateHolder = ThreadLocal<String?>()
+    // Mask to extract the lower 8 bits of an Int, used to format W3C trace-flags as 2-hex-digit byte.
+    private const val BYTE_MASK = 0xFF
     
     /**
      * Get or create a trace ID for the current thread.
@@ -18,7 +23,7 @@ object ContextManager {
     fun getOrCreateTraceId(): String {
         var traceId = traceIdHolder.get()
         if (traceId == null) {
-            traceId = generateTraceId()
+            traceId = UUID.randomUUID().toString().replace("-", "")
             traceIdHolder.set(traceId)
         }
         return traceId
@@ -68,25 +73,45 @@ object ContextManager {
     }
     
     /**
+     * Get the W3C trace flags for the current thread (defaults to 1 = sampled).
+     */
+    fun getTraceFlags(): Int = traceFlagsHolder.get()
+
+    /**
+     * Set the W3C trace flags for the current thread.
+     */
+    fun setTraceFlags(flags: Int) {
+        traceFlagsHolder.set(flags)
+    }
+
+    /**
+     * Get the W3C tracestate for the current thread, or null if not set.
+     */
+    fun getTraceState(): String? = traceStateHolder.get()
+
+    /**
+     * Set the W3C tracestate for the current thread.
+     */
+    fun setTraceState(traceState: String?) {
+        traceStateHolder.set(traceState)
+    }
+
+    /**
      * Clear all context for the current thread.
      */
     fun clear() {
         traceIdHolder.remove()
         spanIdHolder.remove()
         parentSpanIdHolder.remove()
-    }
-    
-    /**
-     * Generate a new trace ID (32 hex characters for W3C compliance).
-     */
-    private fun generateTraceId(): String {
-        return UUID.randomUUID().toString().replace("-", "")
+        traceFlagsHolder.remove()
+        traceStateHolder.remove()
     }
     
     /**
      * Parse W3C traceparent header.
      * Format: 00-{trace-id}-{parent-id}-{trace-flags}
      * Example: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+     * Stores trace flags so they can be forwarded on outgoing requests and written to Span.flags.
      */
     fun parseTraceparent(traceparent: String?): Boolean {
         if (traceparent == null) return false
@@ -97,13 +122,16 @@ object ContextManager {
         val version = parts[0]
         val traceId = parts[1]
         val parentId = parts[2]
+        val flagsHex = parts.last()
         
         if (version != "00") return false
         if (traceId.length != 32) return false
         if (parentId.length != 16) return false
+        if (flagsHex.length != 2) return false
         
         setTraceId(traceId)
         setParentSpanId(parentId)
+        setTraceFlags(flagsHex.toIntOrNull(16) ?: 1)
         
         return true
     }
@@ -111,10 +139,25 @@ object ContextManager {
     /**
      * Generate W3C traceparent header.
      * Format: 00-{trace-id}-{parent-id}-{trace-flags}
+     * Uses the trace flags stored on the current thread (default 01 = sampled).
      */
     fun generateTraceparent(): String {
         val traceId = getOrCreateTraceId()
         val spanId = getSpanId() ?: generateSpanId()
-        return "00-$traceId-$spanId-01"
+        val flagsHex = (getTraceFlags() and BYTE_MASK).toString(16).padStart(2, '0')
+        return "00-$traceId-$spanId-$flagsHex"
+    }
+
+    /**
+     * Convert a lowercase hex string to a byte array.
+     * Used to convert 32-char trace IDs (16 bytes) and 16-char span IDs (8 bytes)
+     * to the byte representation required by the OTLP proto schema.
+     *
+     * Only call this with hex strings produced by [generateSpanId] and UUID-based trace IDs;
+     * the format is always valid and even-length in normal operation.
+     */
+    fun hexToBytes(hex: String): ByteArray {
+        require(hex.length % 2 == 0) { "Invalid hex string: length must be even, got ${hex.length}" }
+        return ByteArray(hex.length / 2) { i -> hex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
     }
 }

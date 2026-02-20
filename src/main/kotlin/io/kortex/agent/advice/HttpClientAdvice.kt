@@ -1,10 +1,14 @@
 package io.kortex.agent.advice
 
+import com.google.protobuf.ByteString
 import io.kortex.agent.ContextManager
 import io.kortex.agent.SpanReporter
 import io.kortex.agent.sanitization.HeaderSanitizer
+import io.kortex.proto.AnyValue
+import io.kortex.proto.KeyValue
 import io.kortex.proto.Span
 import io.kortex.proto.SpanKind
+import io.kortex.proto.Status
 import net.bytebuddy.asm.Advice
 
 /**
@@ -46,16 +50,23 @@ class HttpClientAdvice {
                 if (request != null) {
                     try {
                         val traceparent = ContextManager.generateTraceparent()
+                        val tracestate = ContextManager.getTraceState()
 
                         // Try to inject header (method varies by HTTP client implementation)
                         try {
                             val setHeaderMethod = request.javaClass.getMethod("setHeader", String::class.java, String::class.java)
                             setHeaderMethod.invoke(request, "traceparent", traceparent)
+                            if (!tracestate.isNullOrEmpty()) {
+                                setHeaderMethod.invoke(request, "tracestate", tracestate)
+                            }
                         } catch (e: Exception) {
                             // Try alternate method for header injection
                             try {
                                 val headerMethod = request.javaClass.getMethod("header", String::class.java, String::class.java)
                                 headerMethod.invoke(request, "traceparent", traceparent)
+                                if (!tracestate.isNullOrEmpty()) {
+                                    headerMethod.invoke(request, "tracestate", tracestate)
+                                }
                             } catch (_: Exception) {
                                 // Silently fail if we can't inject header
                             }
@@ -92,20 +103,20 @@ class HttpClientAdvice {
                 val parentSpanId = ContextManager.getParentSpanId()
 
                 // Extract request details
-                val attributes = mutableMapOf<String, String>()
+                val kvAttributes = mutableListOf<KeyValue>()
 
                 if (request != null) {
                     try {
                         val uriMethod = request.javaClass.getMethod("uri")
                         val uri = uriMethod.invoke(request)
                         if (uri != null) {
-                            attributes["http.url"] = uri.toString()
+                            kvAttributes.add(buildStringKv("http.url", uri.toString()))
                         }
 
                         val methodMethod = request.javaClass.getMethod("method")
                         val method = methodMethod.invoke(request)
                         if (method != null) {
-                            attributes["http.method"] = method.toString()
+                            kvAttributes.add(buildStringKv("http.method", method.toString()))
                         }
                     } catch (_: Exception) {
                         // Ignore if we can't extract details
@@ -121,7 +132,9 @@ class HttpClientAdvice {
                             val headerMap = mapMethod.invoke(headers) as? Map<String, List<String>>
                             headerMap?.forEach { (name, values) ->
                                 val sanitizedValues = values.map { HeaderSanitizer.sanitize(name, it) }
-                                attributes["http.request.header.$name"] = sanitizedValues.joinToString(", ")
+                                kvAttributes.add(
+                                    buildStringKv("http.request.header.$name", sanitizedValues.joinToString(", "))
+                                )
                             }
                         }
                     } catch (_: Exception) {
@@ -135,36 +148,49 @@ class HttpClientAdvice {
                         val statusCodeMethod = returnValue.javaClass.getMethod("statusCode")
                         val statusCode = statusCodeMethod.invoke(returnValue) as? Int
                         if (statusCode != null) {
-                            attributes["http.status_code"] = statusCode.toString()
+                            kvAttributes.add(buildStringKv("http.status_code", statusCode.toString()))
                         }
                     } catch (_: Exception) {
                         // Ignore if we can't extract status
                     }
                 }
 
-                val status = if (thrown != null) {
-                    attributes["error"] = "true"
-                    attributes["error.type"] = thrown.javaClass.name
-                    attributes["error.message"] = thrown.message ?: ""
-                    "ERROR"
+                val spanStatus = if (thrown != null) {
+                    kvAttributes.add(buildStringKv("error", "true"))
+                    kvAttributes.add(buildStringKv("error.type", thrown.javaClass.name))
+                    kvAttributes.add(buildStringKv("error.message", thrown.message ?: ""))
+                    Status.newBuilder()
+                        .setCode(Status.StatusCode.STATUS_CODE_ERROR)
+                        .setMessage(thrown.message ?: "")
+                        .build()
                 } else {
-                    "OK"
+                    Status.newBuilder()
+                        .setCode(Status.StatusCode.STATUS_CODE_OK)
+                        .build()
                 }
 
+                val httpMethod = kvAttributes.find { it.key == "http.method" }?.value?.stringValue ?: "?"
+                val httpUrl = kvAttributes.find { it.key == "http.url" }?.value?.stringValue ?: "?"
+
                 val span = Span.newBuilder()
-                    .setTraceId(traceId)
-                    .setSpanId(currentSpanId)
+                    .setTraceId(ByteString.copyFrom(ContextManager.hexToBytes(traceId)))
+                    .setSpanId(ByteString.copyFrom(ContextManager.hexToBytes(currentSpanId)))
                     .apply {
                         if (parentSpanId != null) {
-                            setParentSpanId(parentSpanId)
+                            setParentSpanId(ByteString.copyFrom(ContextManager.hexToBytes(parentSpanId)))
+                        }
+                        val traceState = ContextManager.getTraceState()
+                        if (!traceState.isNullOrEmpty()) {
+                            setTraceState(traceState)
                         }
                     }
-                    .setName("HTTP ${attributes["http.method"] ?: "?"} ${attributes["http.url"] ?: "?"}")
+                    .setName("HTTP $httpMethod $httpUrl")
                     .setKind(SpanKind.SPAN_KIND_CLIENT)
                     .setStartTimeUnixNano(startTime)
                     .setEndTimeUnixNano(endTime)
-                    .putAllAttributes(attributes)
-                    .setStatus(status)
+                    .addAllAttributes(kvAttributes)
+                    .setStatus(spanStatus)
+                    .setFlags(ContextManager.getTraceFlags())
                     .build()
 
                 SpanReporter.reportSpan(span)
@@ -172,5 +198,11 @@ class HttpClientAdvice {
                 // Suppress errors to avoid crashing host application
             }
         }
+
+        private fun buildStringKv(key: String, value: String): KeyValue =
+            KeyValue.newBuilder()
+                .setKey(key)
+                .setValue(AnyValue.newBuilder().setStringValue(value).build())
+                .build()
     }
 }
