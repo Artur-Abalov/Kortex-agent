@@ -86,23 +86,97 @@ java -javaagent:kortex-agent-1.0.0.jar=host=trace-server,port=8080 \
 
 ## Span Data
 
-Every captured operation is reported as a structured span:
+Every captured operation is reported as a structured span wrapped in the OTLP hierarchy:
+`ExportTraceServiceRequest → ResourceSpans → ScopeSpans → Span`
+
+### Resource
+
+A **Resource** represents the entity producing the telemetry — typically the monitored service
+itself. Attributes follow [OTel semantic conventions](https://opentelemetry.io/docs/specs/semconv/resource/),
+e.g. `service.name`, `service.version`, `host.name`. Kortex Agent creates a Resource per
+batch; by default it has no attributes (the host application should populate these at startup
+via agent arguments in a future release).
+
+### InstrumentationScope
+
+The **InstrumentationScope** identifies the library that produced the telemetry. Kortex Agent
+sets `name = "io.kortex.agent"` and `version = "1.0.0"` on every scope, making it easy to
+filter spans by instrumentation library in your backend.
+
+### Span
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Span                                                   │
 ├─────────────────────┬───────────────────────────────────┤
-│ trace_id            │ 32-char hex  (W3C compliant)      │
-│ span_id             │ 16-char hex                       │
-│ parent_span_id      │ 16-char hex  (for linking)        │
+│ trace_id            │ 16 bytes (128-bit, W3C compliant) │
+│ span_id             │ 8 bytes  (64-bit)                 │
+│ parent_span_id      │ 8 bytes  (for linking, optional)  │
 │ name                │ "jdbc.executeQuery", "HTTP GET /…" │
-│ kind                │ DB | SERVER | CLIENT              │
-│ start_time_unix_nano│ nanosecond precision timestamp    │
-│ end_time_unix_nano  │ nanosecond precision timestamp    │
-│ attributes          │ SQL query, HTTP method, status…   │
-│ status              │ OK | ERROR                        │
+│ kind                │ SERVER | CLIENT | INTERNAL | …    │
+│ start_time_unix_nano│ nanosecond precision (fixed64)    │
+│ end_time_unix_nano  │ nanosecond precision (fixed64)    │
+│ attributes          │ repeated KeyValue (typed)         │
+│ status              │ Status{code, message}             │
+│ events              │ repeated Event (time-stamped)     │
+│ links               │ repeated Link (cross-trace refs)  │
 └─────────────────────┴───────────────────────────────────┘
 ```
+
+### Typed Attributes (KeyValue / AnyValue)
+
+Span attributes use the OTLP `repeated KeyValue` format instead of `map<string, string>`,
+enabling **richer typed values** aligned with OTel semantic conventions:
+
+| AnyValue type | Proto field | Example use |
+|---|---|---|
+| `string_value` | `string_value = 1` | `db.statement`, `http.method` |
+| `bool_value`   | `bool_value   = 2` | feature flags |
+| `int_value`    | `int_value    = 3` | `http.status_code` (numeric) |
+| `double_value` | `double_value = 4` | latency measurements |
+| `array_value`  | `array_value  = 5` | multi-value headers |
+| `kvlist_value` | `kvlist_value = 6` | nested structured data |
+| `bytes_value`  | `bytes_value  = 7` | binary payloads |
+
+Kortex Agent currently populates string attributes; the typed schema allows backends to
+store and query values without string parsing.
+
+### Key Attributes by Layer
+
+| Layer | Key Attributes |
+|---|---|
+| JDBC | `db.system`, `db.operation`, `db.statement` (sanitized SQL) |
+| HTTP Server | `http.method`, `http.target`, `http.status_code`, `http.flavor` |
+| HTTP Client | `http.method`, `http.url`, `http.status_code` |
+| Errors (all) | `error=true`, `error.type`, `error.message` |
+
+> **Note on `SPAN_KIND_DB` removal:** The non-standard `SPAN_KIND_DB` enum value has been
+> removed to comply with the OTLP `SpanKind` definition. Database client spans now use
+> `SPAN_KIND_CLIENT` (the application is the client to the database). Database-specific context
+> is expressed via attributes such as `db.system` and `db.statement`, which is the correct
+> pattern per [OTel DB semantic conventions](https://opentelemetry.io/docs/specs/semconv/database/).
+
+### Status
+
+Span outcome is encoded in a typed **Status** message instead of a plain string:
+
+| Code | Meaning |
+|---|---|
+| `STATUS_CODE_UNSET` (0) | No explicit status; operation completed normally |
+| `STATUS_CODE_OK` (1) | Operation completed successfully |
+| `STATUS_CODE_ERROR` (2) | Operation failed — check `status.message` and `error.*` attributes |
+
+### Events
+
+**Events** are time-stamped annotations attached to a span. They share the same typed
+`repeated KeyValue` attribute format as spans. Kortex Agent does not currently emit events,
+but the field is present in the schema for backend and SDK compatibility.
+
+### Links
+
+**Links** connect a span to another span (potentially in a different trace), enabling
+cross-trace relationships such as fan-in or async processing patterns. Each link carries
+`trace_id`, `span_id`, optional `trace_state`, and typed attributes.
 
 ---
 

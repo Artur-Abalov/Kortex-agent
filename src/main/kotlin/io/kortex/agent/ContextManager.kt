@@ -117,4 +117,12 @@ object ContextManager {
         val spanId = getSpanId() ?: generateSpanId()
         return "00-$traceId-$spanId-01"
     }
+
+    /**
+     * Convert a lowercase hex string to a byte array.
+     * Used to convert 32-char trace IDs (16 bytes) and 16-char span IDs (8 bytes)
+     * to the byte representation required by the OTLP proto schema.
+     */
+    fun hexToBytes(hex: String): ByteArray =
+        ByteArray(hex.length / 2) { i -> hex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }
 }

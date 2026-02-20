@@ -6,7 +6,60 @@ option java_package = "io.kortex.proto";
 option java_outer_classname = "SpanProto";
 option java_multiple_files = true;
 
-// SpanKind indicates the type of span
+// AnyValue represents a typed attribute value (OTLP-compatible).
+// Supports string, int, double, bool, bytes, array, and kvlist values.
+message AnyValue {
+  oneof value {
+    string string_value = 1;
+    bool bool_value = 2;
+    int64 int_value = 3;
+    double double_value = 4;
+    ArrayValue array_value = 5;
+    KeyValueList kvlist_value = 6;
+    bytes bytes_value = 7;
+  }
+}
+
+// ArrayValue is a list of AnyValue messages.
+message ArrayValue {
+  repeated AnyValue values = 1;
+}
+
+// KeyValueList is a wrapper around a repeated KeyValue used inside AnyValue.
+message KeyValueList {
+  repeated KeyValue values = 1;
+}
+
+// KeyValue is a key-value pair used for span attributes (OTLP-compatible).
+// Replaces the previous map<string, string> attributes field, enabling richer
+// typed attribute values aligned with OTel semantic conventions.
+message KeyValue {
+  string key = 1;
+  AnyValue value = 2;
+}
+
+// Resource represents the entity producing the telemetry (OTLP-compatible).
+// Attributes follow OTel semantic conventions, e.g. service.name, service.version,
+// host.name. Use these to identify the monitored service and its environment.
+message Resource {
+  repeated KeyValue attributes = 1;
+  uint32 dropped_attributes_count = 2;
+}
+
+// InstrumentationScope identifies the library or component that emitted the span
+// (OTLP-compatible). For Kortex Agent, this is populated with the agent name and
+// version to indicate which instrumentation library produced the telemetry.
+message InstrumentationScope {
+  string name = 1;
+  string version = 2;
+  repeated KeyValue attributes = 3;
+  uint32 dropped_attributes_count = 4;
+}
+
+// SpanKind indicates the role of a span in the trace (OTLP-compatible).
+// Note: SPAN_KIND_DB has been removed — database-specific context should be
+// expressed via attributes such as db.system and db.statement, with the span
+// kind set to SPAN_KIND_CLIENT (the application acts as a client to the DB).
 enum SpanKind {
   SPAN_KIND_UNSPECIFIED = 0;
   SPAN_KIND_INTERNAL = 1;
@@ -14,33 +67,112 @@ enum SpanKind {
   SPAN_KIND_CLIENT = 3;
   SPAN_KIND_PRODUCER = 4;
   SPAN_KIND_CONSUMER = 5;
-  SPAN_KIND_DB = 6;
 }
 
-// Span represents a single operation
+// Status represents the outcome of a span (OTLP-compatible).
+message Status {
+  // Human-readable status description, typically an error message on failure.
+  string message = 1;
+
+  // StatusCode encodes the result of the span operation.
+  enum StatusCode {
+    STATUS_CODE_UNSET = 0;  // Default; operation completed without explicit status.
+    STATUS_CODE_OK = 1;     // Operation completed successfully.
+    STATUS_CODE_ERROR = 2;  // Operation failed.
+  }
+
+  StatusCode code = 2;
+}
+
+// Span represents a single operation within a distributed trace (OTLP-compatible).
 message Span {
-  string trace_id = 1;
-  string span_id = 2;
-  string parent_span_id = 3;
-  string name = 4;
-  SpanKind kind = 5;
-  int64 start_time_unix_nano = 6;
-  int64 end_time_unix_nano = 7;
-  map<string, string> attributes = 8;
-  string status = 9;
+  // trace_id is a 16-byte (128-bit) unique identifier for the trace.
+  bytes trace_id = 1;
+  // span_id is an 8-byte (64-bit) unique identifier for this span.
+  bytes span_id = 2;
+  // trace_state carries vendor-specific trace identification data.
+  string trace_state = 3;
+  // parent_span_id is the 8-byte span ID of this span's parent, or empty for root spans.
+  bytes parent_span_id = 4;
+  // name is a human-readable description of the operation.
+  string name = 5;
+  // kind describes the role of this span in the trace.
+  SpanKind kind = 6;
+  // start_time_unix_nano is the start time of the span in nanoseconds since Unix epoch.
+  fixed64 start_time_unix_nano = 7;
+  // end_time_unix_nano is the end time of the span in nanoseconds since Unix epoch.
+  fixed64 end_time_unix_nano = 8;
+  // attributes are key-value pairs describing the span using OTel semantic conventions.
+  repeated KeyValue attributes = 9;
+  uint32 dropped_attributes_count = 10;
+  // events are time-stamped annotations attached to this span.
+  repeated Event events = 11;
+  uint32 dropped_events_count = 12;
+  // links connect this span to other spans, enabling cross-trace relationships.
+  repeated Link links = 13;
+  uint32 dropped_links_count = 14;
+  // status encodes whether the span completed successfully or with an error.
+  Status status = 15;
+  // flags carries W3C trace context flags (sampled, etc.).
+  uint32 flags = 16;
+
+  // Event is a time-stamped annotation attached to a span.
+  message Event {
+    fixed64 time_unix_nano = 1;
+    string name = 2;
+    repeated KeyValue attributes = 3;
+    uint32 dropped_attributes_count = 4;
+  }
+
+  // Link connects this span to another span, enabling cross-trace relationships.
+  message Link {
+    bytes trace_id = 1;
+    bytes span_id = 2;
+    string trace_state = 3;
+    repeated KeyValue attributes = 4;
+    uint32 dropped_attributes_count = 5;
+    uint32 flags = 6;
+  }
 }
 
-// SpanBatch is a collection of spans
-message SpanBatch {
-  repeated Span spans = 1;
+// ScopeSpans groups spans emitted by the same InstrumentationScope (OTLP-compatible).
+message ScopeSpans {
+  InstrumentationScope scope = 1;
+  repeated Span spans = 2;
+  string schema_url = 3;
 }
 
-// SpanService for sending spans to Kortex Core
-service SpanService {
-  rpc SendSpans(SpanBatch) returns (SendSpansResponse);
+// ResourceSpans groups ScopeSpans by the Resource that produced them (OTLP-compatible).
+message ResourceSpans {
+  Resource resource = 1;
+  repeated ScopeSpans scope_spans = 2;
+  string schema_url = 3;
 }
 
-message SendSpansResponse {
-  bool success = 1;
-  string message = 2;
+// ExportTraceServiceRequest is the top-level request for exporting trace data.
+// Replaces the previous SpanBatch, wrapping spans in the OTLP hierarchy:
+// ExportTraceServiceRequest → ResourceSpans → ScopeSpans → Span.
+message ExportTraceServiceRequest {
+  repeated ResourceSpans resource_spans = 1;
+}
+
+// ExportTracePartialSuccess reports a partial failure when some spans were rejected.
+message ExportTracePartialSuccess {
+  // rejected_spans is the number of spans that could not be ingested.
+  int64 rejected_spans = 1;
+  // error_message provides a human-readable explanation for the rejection.
+  string error_message = 2;
+}
+
+// ExportTraceServiceResponse is the response to an Export RPC call.
+// Replaces SendSpansResponse. A missing or empty partial_success field indicates
+// full success; a non-zero rejected_spans indicates partial or full failure.
+message ExportTraceServiceResponse {
+  ExportTracePartialSuccess partial_success = 1;
+}
+
+// TraceService is the gRPC service for exporting trace spans to Kortex Core.
+// Replaces the previous SpanService / SendSpans RPC.
+service TraceService {
+  rpc Export(ExportTraceServiceRequest) returns (ExportTraceServiceResponse);
 }

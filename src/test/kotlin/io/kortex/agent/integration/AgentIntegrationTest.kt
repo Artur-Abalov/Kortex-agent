@@ -1,6 +1,7 @@
 package io.kortex.agent.integration
 
 import io.kortex.proto.SpanKind
+import io.kortex.proto.Status
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -48,13 +49,14 @@ class AgentIntegrationTest {
     /**
      * Verify that a `PreparedStatement.executeQuery("SELECT 1")` triggers a
      * span with:
-     * - kind = DB
-     * - a non-empty `trace_id`
+     * - kind = CLIENT (JDBC spans use SPAN_KIND_CLIENT per OTLP; db.system
+     *   and db.statement attributes carry the database-specific context)
+     * - a non-empty `trace_id` (16 bytes)
      * - `start_time < end_time`
      * - a `db.statement` attribute containing the SQL text
      */
     @Test
-    fun `JDBC instrumentation sends span with DB kind and SQL query`() {
+    fun `JDBC instrumentation sends span with CLIENT kind and SQL query`() {
         mockCollector.start(expectedSpans = 1)
 
         val process = spawnChildJvm(
@@ -72,18 +74,19 @@ class AgentIntegrationTest {
         assertTrue(spans.isNotEmpty(), "Mock collector must have received at least one span")
 
         val span = spans[0]
-        assertTrue(span.traceId.isNotEmpty(), "Span must carry a non-empty trace_id")
-        assertEquals(SpanKind.SPAN_KIND_DB, span.kind, "Span kind must be DB")
+        assertTrue(span.traceId.size() > 0, "Span must carry a non-empty trace_id")
+        assertEquals(SpanKind.SPAN_KIND_CLIENT, span.kind, "Span kind must be CLIENT for database operations")
         assertTrue(
             span.startTimeUnixNano < span.endTimeUnixNano,
             "Span start time must be before end time"
         )
         assertTrue(
-            span.attributesMap.containsKey("db.statement"),
+            span.attributesList.any { it.key == "db.statement" },
             "Span must contain a db.statement attribute with the SQL text"
         )
         assertTrue(
-            span.attributesMap["db.statement"]?.contains("SELECT", ignoreCase = true) == true,
+            span.attributesList.find { it.key == "db.statement" }
+                ?.value?.stringValue?.contains("SELECT", ignoreCase = true) == true,
             "db.statement attribute must include the SELECT keyword"
         )
     }
@@ -116,12 +119,12 @@ class AgentIntegrationTest {
 
         val traceIds = spans.map { it.traceId }.toSet()
         assertEquals(1, traceIds.size, "Both spans must share the same trace_id")
-        assertTrue(traceIds.single().isNotEmpty(), "The shared trace_id must not be empty")
+        assertTrue(traceIds.single().size() > 0, "The shared trace_id must not be empty")
 
         // Span B (server-side) must reference Span A's spanId as its parent
         val spanA = spans[0]
         val spanB = spans[1]
-        assertNotNull(spanB.parentSpanId.takeIf { it.isNotEmpty() }) {
+        assertNotNull(spanB.parentSpanId.takeIf { it.size() > 0 }) {
             "Server-side span must have a non-empty parent_span_id"
         }
         assertEquals(
@@ -136,7 +139,7 @@ class AgentIntegrationTest {
     /**
      * Verify that a JDBC error (duplicate-key violation) still produces a span
      * with:
-     * - `status = "ERROR"`
+     * - `status.code = STATUS_CODE_ERROR`
      * - an `error` attribute set to `"true"`
      * - a non-empty `error.message` attribute capturing the exception message
      */
@@ -160,12 +163,16 @@ class AgentIntegrationTest {
         val spans = mockCollector.receivedSpans
         assertTrue(spans.isNotEmpty(), "Mock collector must have received at least one span")
 
-        val errorSpan = spans.find { it.status == "ERROR" }
-        assertNotNull(errorSpan, "At least one span must have status = ERROR")
-        assertEquals("true", errorSpan.attributesMap["error"],
-            "error attribute must be set to 'true'")
+        val errorSpan = spans.find { it.status.code == Status.StatusCode.STATUS_CODE_ERROR }
+        assertNotNull(errorSpan, "At least one span must have status code = STATUS_CODE_ERROR")
+        assertEquals(
+            "true",
+            errorSpan.attributesList.find { it.key == "error" }?.value?.stringValue,
+            "error attribute must be set to 'true'"
+        )
         assertTrue(
-            errorSpan.attributesMap["error.message"]?.isNotEmpty() == true,
+            errorSpan.attributesList.find { it.key == "error.message" }
+                ?.value?.stringValue?.isNotEmpty() == true,
             "error.message must capture the exception message"
         )
     }

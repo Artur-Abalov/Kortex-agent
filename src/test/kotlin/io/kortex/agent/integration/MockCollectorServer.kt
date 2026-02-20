@@ -3,10 +3,10 @@ package io.kortex.agent.integration
 import io.grpc.Server
 import io.grpc.ServerBuilder
 import io.grpc.stub.StreamObserver
-import io.kortex.proto.SendSpansResponse
+import io.kortex.proto.ExportTraceServiceRequest
+import io.kortex.proto.ExportTraceServiceResponse
 import io.kortex.proto.Span
-import io.kortex.proto.SpanBatch
-import io.kortex.proto.SpanServiceGrpc
+import io.kortex.proto.TraceServiceGrpc
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -14,9 +14,12 @@ import java.util.concurrent.TimeUnit
 /**
  * A lightweight in-process gRPC server that impersonates Kortex Core.
  *
- * It collects all [Span] objects received via [SpanService.SendSpans] into
+ * It collects all [Span] objects received via [TraceService.Export] into
  * [receivedSpans] and uses a [CountDownLatch] so tests can block until an
  * expected number of spans arrive.
+ *
+ * Spans are extracted from the OTLP hierarchy:
+ * ExportTraceServiceRequest → ResourceSpans → ScopeSpans → Span
  *
  * Usage:
  * ```
@@ -48,21 +51,20 @@ class MockCollectorServer {
         receivedSpans.clear()
         latch = CountDownLatch(expectedSpans)
 
-        val service = object : SpanServiceGrpc.SpanServiceImplBase() {
-            override fun sendSpans(
-                request: SpanBatch,
-                responseObserver: StreamObserver<SendSpansResponse>
+        val service = object : TraceServiceGrpc.TraceServiceImplBase() {
+            override fun export(
+                request: ExportTraceServiceRequest,
+                responseObserver: StreamObserver<ExportTraceServiceResponse>
             ) {
-                request.spansList.forEach { span ->
-                    receivedSpans.add(span)
-                    latch.countDown()
+                request.resourceSpansList.forEach { resourceSpans ->
+                    resourceSpans.scopeSpansList.forEach { scopeSpans ->
+                        scopeSpans.spansList.forEach { span ->
+                            receivedSpans.add(span)
+                            latch.countDown()
+                        }
+                    }
                 }
-                responseObserver.onNext(
-                    SendSpansResponse.newBuilder()
-                        .setSuccess(true)
-                        .setMessage("OK")
-                        .build()
-                )
+                responseObserver.onNext(ExportTraceServiceResponse.newBuilder().build())
                 responseObserver.onCompleted()
             }
         }
